@@ -1,6 +1,7 @@
+#!/usr/bin/env python3
 """
 Plot SGLang Benchmark Results
-Generates comparison plots from saved benchmark data.
+Generates comparison plots from saved benchmark data in a directory.
 """
 
 import json
@@ -9,6 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import List, Dict
+import re
 
 
 def load_results(stats_file: str, results_file: str) -> Dict:
@@ -20,6 +22,38 @@ def load_results(stats_file: str, results_file: str) -> Dict:
         results = json.load(f)
     
     return {'stats': stats, 'results': results}
+
+
+def find_result_pairs(directory: str) -> List[Dict]:
+    """Find all matching *_stats.json and *_results.json pairs in directory."""
+    dir_path = Path(directory)
+    
+    if not dir_path.exists():
+        print(f"ERROR: Directory '{directory}' does not exist")
+        return []
+    
+    # Find all stats files
+    stats_files = list(dir_path.glob("*_stats.json"))
+    
+    pairs = []
+    for stats_file in stats_files:
+        # Get the prefix (everything before _stats.json)
+        prefix = str(stats_file.stem).replace('_stats', '')
+        results_file = dir_path / f"{prefix}_results.json"
+        
+        if results_file.exists():
+            pairs.append({
+                'prefix': prefix,
+                'stats_file': str(stats_file),
+                'results_file': str(results_file)
+            })
+        else:
+            print(f"WARNING: Found {stats_file.name} but missing {results_file.name}")
+    
+    # Sort by prefix for consistent ordering
+    pairs.sort(key=lambda x: x['prefix'])
+    
+    return pairs
 
 
 def calculate_inter_token_latency(results: List[Dict]) -> Dict[str, float]:
@@ -137,69 +171,77 @@ def plot_throughput_comparison(configs: List[Dict], output_file: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Plot SGLang benchmark results",
+        description="Plot SGLang benchmark results from a directory",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Example usage:
-  # Single configuration
-  python plot_results.py baseline_conc8
-  
-  # Compare multiple configurations
-  python plot_results.py baseline_conc8 offload_conc8 --names "Baseline" "CPU Offload"
-  
-  # Multiple concurrency levels
-  python plot_results.py baseline_conc1 baseline_conc4 baseline_conc8 \\
-      --names "Conc 1" "Conc 4" "Conc 8"
-        """
+        Example usage:
+          # Plot all results in a directory
+          python plot_results.py results/
+          
+          # Specify output files
+          python plot_results.py results/ --output my_comparison.png
+                """
     )
-    parser.add_argument("prefixes", nargs='+',
-                       help="Output prefixes from benchmark runs (e.g., 'baseline_conc8')")
-    parser.add_argument("--names", nargs='+',
-                       help="Custom names for configurations (must match number of prefixes)")
+    parser.add_argument("directory", help="Directory containing *_stats.json and *_results.json files")
     parser.add_argument("--output", default="benchmark_comparison.png",
-                       help="Output plot filename")
+                        help="Output latency comparison plot filename")
     parser.add_argument("--throughput-plot", default="throughput_comparison.png",
-                       help="Output throughput plot filename")
+                        help="Output throughput plot filename")
     
     args = parser.parse_args()
     
-    # Validate
-    if args.names and len(args.names) != len(args.prefixes):
-        print(f"ERROR: Number of names ({len(args.names)}) must match number of prefixes ({len(args.prefixes)})")
+    print("="*60)
+    print("SGLang Benchmark Plotter")
+    print("="*60)
+    print(f"Directory: {args.directory}")
+    print()
+    
+    # Find all result pairs in directory
+    pairs = find_result_pairs(args.directory)
+    
+    if not pairs:
+        print("ERROR: No result files found in directory")
+        print("Expected files matching pattern: <prefix>_stats.json and <prefix>_results.json")
         return
     
-    # Load all configurations
-    configs = []
-    for i, prefix in enumerate(args.prefixes):
-        stats_file = f"{prefix}_stats.json"
-        results_file = f"{prefix}_results.json"
+    print(f"Found {len(pairs)} result pair(s):")
+    for pair in pairs:
+        print(f"  - {pair['prefix']}")
+    print()
+    
+    # Load all configurations into a temporary list
+    loaded_configs = []
+    for pair in pairs:
+        print(f"Loading {pair['prefix']}...")
+        data = load_results(pair['stats_file'], pair['results_file'])
         
-        if not Path(stats_file).exists() or not Path(results_file).exists():
-            print(f"ERROR: Missing files for prefix '{prefix}'")
-            print(f"  Expected: {stats_file} and {results_file}")
-            continue
-        
-        print(f"Loading {prefix}...")
-        data = load_results(stats_file, results_file)
-        
-        name = args.names[i] if args.names else prefix
-        configs.append({
-            'name': name,
+        loaded_configs.append({
+            'name': pair['prefix'],
             'stats': data['stats'],
             'results': data['results']
         })
+
+    # SORTING LOGIC: Sort by the numeric concurrency level found in the name
+    # This ensures 8 comes before 16, and 16 before 32.
+    configs = sorted(
+        loaded_configs,
+        key=lambda x: int(re.search(r'conc_(\d+)', x['name']).group(1)) if re.search(r'conc_(\d+)', x['name']) else 0
+    )
     
-    if not configs:
-        print("ERROR: No valid configurations loaded")
-        return
+    print(f"\nGenerating plots for {len(configs)} configuration(s) (Sorted by concurrency)...")
     
-    print(f"\nGenerating plots for {len(configs)} configuration(s)...")
+    # Generate filenames based on directory name
+    base_prefix = args.directory.strip("/").replace("/", "_")
     
-    # Generate plots
-    plot_comparison(configs, args.output)
-    plot_throughput_comparison(configs, args.throughput_plot)
+    # Generate plots using the sorted configs
+    plot_comparison(configs, f"{base_prefix}_latency.png")
+    plot_throughput_comparison(configs, f"{base_prefix}_throughput.png")
     
     print("\n✓ Done!")
+
+
+if __name__ == "__main__":
+    main()
 
 
 if __name__ == "__main__":

@@ -1,7 +1,6 @@
 [
   {
-    "arrival_time": 0.0,
-    "session_id": 0,
+    "arrival_time": 0.0, "session_id": 0,
     "turn_idx": 0,
     "prefix_tokens": 3586,
     "new_input_tokens": 139,

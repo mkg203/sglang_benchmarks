@@ -1,0 +1,79 @@
+{
+  "num_requests": 200,
+  "total_duration": 80.03460097312927,
+  "time_to_first_token": {
+    "min": 0.017280947417020798,
+    "p50": 0.2398268897086382,
+    "p90": 3.7149206269532407,
+    "p95": 4.3553864497691395,
+    "p99": 4.415547486394644,
+    "max": 4.4252172857522964,
+    "mean": 1.264528713785112,
+    "std": 1.5454856843787208
+  },
+  "prefill_latency": {
+    "min": 0.016233008354902267,
+    "p50": 0.23466018587350845,
+    "p90": 0.854546993970871,
+    "p95": 0.8632520139217377,
+    "p99": 0.9990699961781502,
+    "max": 0.9990699961781502,
+    "mean": 0.39479898430407045,
+    "std": 0.3437812257339695
+  },
+  "decode_latency": {
+    "min": 5.926481775939465,
+    "p50": 28.440921548753977,
+    "p90": 56.16635424681008,
+    "p95": 63.60857008472083,
+    "p99": 67.96332822155206,
+    "max": 69.97650782391429,
+    "mean": 31.335058650411664,
+    "std": 16.23107931450121
+  },
+  "inter_token_latency": {
+    "min": 0.020765738050033757,
+    "p50": 0.11488242920774458,
+    "p90": 0.16116025403511425,
+    "p95": 0.16721951145897396,
+    "p99": 0.20834016068473463,
+    "max": 0.22948527316513814,
+    "mean": 0.10981289411793885,
+    "std": 0.04274269702253048
+  },
+  "total_latency": {
+    "min": 5.996210813522339,
+    "p50": 30.041682720184326,
+    "p90": 57.52555327415466,
+    "p95": 65.45955393314361,
+    "p99": 68.70098984718322,
+    "max": 70.14097380638123,
+    "mean": 32.59958736419678,
+    "std": 16.614796467027542
+  },
+  "total_input_tokens": 519670,
+  "total_output_tokens": 59305,
+  "total_tokens": 578975,
+  "throughput_tokens_per_sec": 7234.058681624269,
+  "throughput_requests_per_sec": 2.4989191870544563,
+  "initial_server_metrics": {
+    "sglang:num_used_tokens": 7.0,
+    "sglang:token_usage": 0.0,
+    "sglang:pending_prealloc_token_usage": 0.0,
+    "sglang:swa_token_usage": 0.0,
+    "sglang:gen_throughput": 0.0,
+    "sglang:cache_hit_rate": 0.0,
+    "sglang:max_total_num_tokens": 415466.0
+  },
+  "final_server_metrics": {
+    "sglang:num_used_tokens": 1159.0,
+    "sglang:token_usage": 0.0,
+    "sglang:pending_prealloc_token_usage": 0.0,
+    "sglang:swa_token_usage": 0.0,
+    "sglang:gen_throughput": 0.0,
+    "sglang:cache_hit_rate": 0.0,
+    "sglang:max_total_num_tokens": 415466.0
+  },
+  "peak_kv_cache_tokens": 415466.0,
+  "used_kv_cache_tokens": 1159.0
+}
