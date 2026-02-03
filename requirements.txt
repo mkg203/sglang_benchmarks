@@ -48,6 +48,7 @@ hf-transfer==0.1.9
 hf-xet==1.2.0
 httpcore==1.0.9
 httpx==0.28.1
+huggingface==0.0.1
 huggingface-hub==0.36.0
 idna==3.11
 interegular==0.3.3
