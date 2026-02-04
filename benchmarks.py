@@ -7,6 +7,7 @@ import numpy as np
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, asdict
 from pathlib import Path
+from tqdm import tqdm
 
 # --- Configuration & Constants ---
 METRICS_TO_TRACK = [
@@ -18,21 +19,23 @@ METRICS_TO_TRACK = [
     "num_retractions",
 ]
 
+
 @dataclass
 class RequestResult:
     """Store metrics for a single request."""
-    request_id: int
+
+    request_id: tuple[int, int]
     session_id: int
     turn_idx: int
     prefix_tokens: int
     new_input_tokens: int
     output_tokens: int
-    
+
     # Timing
     scheduled_arrival_time: float
     actual_start_time: float
     completion_time: float
-    
+
     # Latencies
     time_to_first_token: float
     prefill_time: float
@@ -40,7 +43,7 @@ class RequestResult:
     total_latency: float
     server_queue_time: float
     server_e2e_latency: float
-    
+
     # Meta
     cached_tokens: int
 
@@ -48,24 +51,35 @@ class RequestResult:
 class BenchmarkRunner:
     def __init__(self, server_url: str = "http://localhost:30000"):
         self.server_url = server_url.rstrip("/")
-        self.results: List[RequestResult] = []
+        self.results: list[RequestResult] = []
         self.benchmark_start_time = 0.0
+        self.session_histories = {}
 
     async def send_request(
-        self, session: aiohttp.ClientSession, request_data: Dict, request_id: int
+        self,
+        session: aiohttp.ClientSession,
+        request_data: dict,
+        request_id: tuple[int, int],
     ) -> RequestResult:
         """Send a single request and collect metrics."""
         # Calculate wait time relative to benchmark start
         target_time = self.benchmark_start_time + request_data["arrival_time"]
         wait_time = target_time - time.time()
-        
+
         if wait_time > 0:
             await asyncio.sleep(wait_time)
 
         actual_start_abs = time.time()
-        
+
+        session_id = request_data["session_id"]
+        self.session_histories[session_id] = (
+            self.session_histories.get(session_id, request_data.get("prefix_text", ""))
+            + request_data["query_text"]
+        )
+
         payload = {
-            "text": request_data["prefix_text"],
+            # "text": request_data.get("prefix_text", "") + request_data["query_text"],
+            "text": self.session_histories[session_id],
             "sampling_params": {
                 "max_new_tokens": request_data["output_tokens"],
                 "temperature": 0.0,
@@ -82,9 +96,11 @@ class BenchmarkRunner:
                 completion_time_abs = time.time()
 
                 meta = result.get("meta_info", {})
-                
+
                 # Server-reported metrics
-                server_e2e = meta.get("e2e_latency", completion_time_abs - actual_start_abs)
+                server_e2e = meta.get(
+                    "e2e_latency", completion_time_abs - actual_start_abs
+                )
                 server_queue = meta.get("queue_time", 0)
                 server_prefill = meta.get("prefill_launch_latency", 0)
 
@@ -115,21 +131,48 @@ class BenchmarkRunner:
             print(f"ERROR: Request {request_id} failed: {e}")
             raise
 
-    async def run_benchmark(self, workload: List[Dict]) -> List[RequestResult]:
+    async def run_session(
+        self, session: aiohttp.ClientSession, session_workload: list[dict], pbar: tqdm
+    ) -> list[RequestResult]:
+        session_results = []
+        for request in session_workload:
+            result = await self.send_request(
+                session, request, (request["session_id"], request["turn_idx"])
+            )
+            session_results.append(result)
+            pbar.update(1)
+
+        return session_results
+
+    async def run_benchmark(
+        self, workload: dict[int, list[dict]]
+    ) -> list[RequestResult]:
         """Run the full benchmark workload."""
-        print(f"Running benchmark with {len(workload)} requests...")
+        total_requests = sum(len(s_load) for s_load in workload.values())
+        print(
+            f"Running benchmark with {len(workload)} sessions and ({total_requests=}..."
+        )
+
         self.benchmark_start_time = time.time()
 
         async with aiohttp.ClientSession() as session:
-            tasks = [
-                self.send_request(session, req, idx) 
-                for idx, req in enumerate(workload)
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            with tqdm(
+                total=total_requests, desc="Processing Requests", unit="reqs"
+            ) as pbar:
+                tasks = [
+                    self.run_session(session, session_workload, pbar)
+                    for session_id, session_workload in workload.items()
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Filter out failed requests
-        self.results = [r for r in results if isinstance(r, RequestResult)]
-        
+        self.results = [
+            request
+            for session_results in results
+            if isinstance(session_results, list)
+            for request in session_results
+            if isinstance(request, RequestResult)
+        ]
+
         duration = time.time() - self.benchmark_start_time
         print(f"Benchmark completed in {duration:.2f}s")
         print(f"Successful requests: {len(self.results)}/{len(workload)}")
@@ -154,7 +197,7 @@ class BenchmarkRunner:
         for line in metrics_text.splitlines():
             if line.startswith("#") or not line.strip():
                 continue
-            
+
             # Expecting format: metric_name{labels} value
             parts = line.split()
             if len(parts) < 2:
@@ -171,7 +214,9 @@ class BenchmarkRunner:
         return metrics
 
 
-def calculate_statistics(results: List[RequestResult], duration: float) -> Dict[str, Any]:
+def calculate_statistics(
+    results: List[RequestResult], duration: float
+) -> Dict[str, Any]:
     """Calculate comprehensive statistics from request results."""
     if not results:
         return {}
@@ -181,10 +226,9 @@ def calculate_statistics(results: List[RequestResult], duration: float) -> Dict[
     prefill = [r.prefill_time for r in results]
     decode = [r.decode_time for r in results]
     total = [r.total_latency for r in results]
-    
+
     inter_token_latency = [
-        r.decode_time / r.output_tokens 
-        for r in results if r.output_tokens > 0
+        r.decode_time / r.output_tokens for r in results if r.output_tokens > 0
     ]
 
     def get_percentiles(data: List[float]) -> Dict[str, float]:
@@ -220,15 +264,13 @@ def calculate_statistics(results: List[RequestResult], duration: float) -> Dict[
     }
 
 
-def augment_stats_with_server_metrics(
-    stats: Dict, initial: Dict, final: Dict
-) -> Dict:
+def augment_stats_with_server_metrics(stats: Dict, initial: Dict, final: Dict) -> Dict:
     """Add KV cache, cache hit rate, and preemption metrics to stats."""
-    
+
     # 1. KV Cache Usage (Snapshot at end)
     used = final.get("sglang:num_used_tokens", 0)
     total = final.get("sglang:max_total_num_tokens", 0)
-    
+
     stats["server_metrics"] = {
         "kv_cache_usage_tokens": used,
         "kv_cache_capacity_tokens": total,
@@ -240,7 +282,9 @@ def augment_stats_with_server_metrics(
     # Using 'get' with 0 default to handle cases where metric is missing
     init_retractions = initial.get("sglang:num_retractions", 0)
     final_retractions = final.get("sglang:num_retractions", 0)
-    stats["server_metrics"]["num_preemptions"] = max(0, final_retractions - init_retractions)
+    stats["server_metrics"]["num_preemptions"] = max(
+        0, final_retractions - init_retractions
+    )
 
     return stats
 
@@ -249,7 +293,9 @@ async def main():
     parser = argparse.ArgumentParser(description="SGLang Benchmark Runner")
     parser.add_argument("workload", type=Path, help="Path to workload JSON file")
     parser.add_argument("--output", required=True, type=Path, help="Output file prefix")
-    parser.add_argument("--server", default="http://localhost:30000", help="SGLang server URL")
+    parser.add_argument(
+        "--server", default="http://localhost:30000", help="SGLang server URL"
+    )
     args = parser.parse_args()
 
     # Ensure output directory exists
@@ -263,9 +309,19 @@ async def main():
     print("=" * 60)
 
     # Load workload
+    n_requests: int
     with open(args.workload, "r") as f:
-        workload = json.load(f)
-    print(f"Loaded {len(workload)} requests")
+        data = json.load(f)
+        n_requests = len(data)
+        workload = {}
+        for request in data:
+            s_id = int(request.session_id)
+            if s_id not in workload:
+                workload[s_id] = [request]
+                continue
+
+            workload[s_id].append(request)
+    print(f"Loaded {n_requests} requests")
 
     runner = BenchmarkRunner(server_url=args.server)
 
@@ -276,7 +332,7 @@ async def main():
     # Run Benchmark
     print()
     results = await runner.run_benchmark(workload)
-    
+
     # Final Metrics
     print("\nCollecting final server metrics...")
     final_metrics = await runner.collect_metrics()
@@ -285,7 +341,7 @@ async def main():
     print("\nCalculating statistics...")
     duration = max((r.completion_time for r in results), default=0)
     stats = calculate_statistics(results, duration)
-    
+
     # Add Server Metrics (KV, Preemptions, Cache Hit)
     stats = augment_stats_with_server_metrics(stats, initial_metrics, final_metrics)
     stats["raw_initial_metrics"] = initial_metrics
@@ -311,15 +367,21 @@ async def main():
     print(f"Duration:      {stats['total_duration']:.2f}s")
     print(f"Throughput:    {stats['throughput_tokens_per_sec']:.2f} tokens/s")
     print(f"               {stats['throughput_requests_per_sec']:.2f} req/s")
-    
+
     print("-" * 60)
     print(f"Latency (P50 | P99)")
-    print(f"TTFT:          {ttft.get('p50',0)*1000:.2f}ms | {ttft.get('p99',0)*1000:.2f}ms")
-    print(f"ITL:           {itl.get('p50',0)*1000:.2f}ms | {itl.get('p99',0)*1000:.2f}ms")
-    
+    print(
+        f"TTFT:          {ttft.get('p50',0)*1000:.2f}ms | {ttft.get('p99',0)*1000:.2f}ms"
+    )
+    print(
+        f"ITL:           {itl.get('p50',0)*1000:.2f}ms | {itl.get('p99',0)*1000:.2f}ms"
+    )
+
     print("-" * 60)
     print("Server Metrics")
-    print(f"KV Cache Usage:    {sm['kv_cache_usage_pct']:.2f}% ({int(sm['kv_cache_usage_tokens'])}/{int(sm['kv_cache_capacity_tokens'])})")
+    print(
+        f"KV Cache Usage:    {sm['kv_cache_usage_pct']:.2f}% ({int(sm['kv_cache_usage_tokens'])}/{int(sm['kv_cache_capacity_tokens'])})"
+    )
     print(f"Prefix Cache Hit:  {sm['prefix_cache_hit_rate'] * 100:.2f}%")
     print(f"Preemptions:       {sm['num_preemptions']}")
     print("=" * 60)
