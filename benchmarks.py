@@ -72,14 +72,14 @@ class BenchmarkRunner:
         actual_start_abs = time.time()
 
         session_id = request_data["session_id"]
-        self.session_histories[session_id] = (
+        text = (
             self.session_histories.get(session_id, request_data.get("prefix_text", ""))
             + request_data["query_text"]
         )
 
         payload = {
             # "text": request_data.get("prefix_text", "") + request_data["query_text"],
-            "text": self.session_histories[session_id],
+            "text": text,
             "sampling_params": {
                 "max_new_tokens": request_data["output_tokens"],
                 "temperature": 0.0,
@@ -96,6 +96,8 @@ class BenchmarkRunner:
                 completion_time_abs = time.time()
 
                 meta = result.get("meta_info", {})
+                # update session history
+                self.session_histories[session_id] = text + result.get("text", "")
 
                 # Server-reported metrics
                 server_e2e = meta.get(
@@ -157,7 +159,7 @@ class BenchmarkRunner:
 
         async with aiohttp.ClientSession() as session:
             with tqdm(
-                total=total_requests, desc="Processing Requests", unit="reqs"
+                total=total_requests, desc="Processing Requests", unit="req"
             ) as pbar:
                 tasks = [
                     self.run_session(session, session_workload, pbar)
