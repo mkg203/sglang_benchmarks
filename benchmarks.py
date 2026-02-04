@@ -317,7 +317,7 @@ async def main():
         n_requests = len(data)
         workload = {}
         for request in data:
-            s_id = int(request.session_id)
+            s_id = int(request["session_id"])
             if s_id not in workload:
                 workload[s_id] = [request]
                 continue
