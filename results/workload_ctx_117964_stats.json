@@ -1,0 +1,89 @@
+{
+  "num_requests": 56,
+  "total_duration": 835.4074597358704,
+  "throughput_tokens_per_sec": 8011.346944538937,
+  "throughput_requests_per_sec": 0.06703315770929966,
+  "total_input_tokens": 6684342,
+  "total_output_tokens": 8397,
+  "time_to_first_token": {
+    "min": 0.020237822085618973,
+    "p50": 4.534084174782038,
+    "p90": 29.2972950655967,
+    "p95": 44.684477371163666,
+    "p99": 55.85778673104943,
+    "max": 57.922330014407635,
+    "mean": 10.191508009364563,
+    "std": 14.343383642399957
+  },
+  "prefill_latency": {
+    "min": 0.016813185065984726,
+    "p50": 1.0850350931286812,
+    "p90": 1.5750559866428375,
+    "p95": 1.5853869477286935,
+    "p99": 1.5883188553154468,
+    "max": 1.5889316760003567,
+    "mean": 0.8881366197019815,
+    "std": 0.6005739726299705
+  },
+  "decode_latency": {
+    "min": 1.8291657976806164,
+    "p50": 16.720155209302902,
+    "p90": 48.10164272226393,
+    "p95": 55.45325449667871,
+    "p99": 65.27171625047923,
+    "max": 67.67863962054253,
+    "mean": 21.114536143440223,
+    "std": 18.354931686531412
+  },
+  "inter_token_latency": {
+    "min": 0.014583585814044283,
+    "p50": 0.12515687399093356,
+    "p90": 0.293688934639158,
+    "p95": 0.3458950816164581,
+    "p99": 0.45623485327897895,
+    "max": 0.527520127594471,
+    "mean": 0.14233449585157415,
+    "std": 0.12262516988780023
+  },
+  "total_latency": {
+    "min": 1.8494036197662354,
+    "p50": 30.334516882896423,
+    "p90": 66.4402117729187,
+    "p95": 69.6234964132309,
+    "p99": 74.72190977334976,
+    "max": 76.0889801979065,
+    "mean": 31.306044152804784,
+    "std": 24.179173666079645
+  },
+  "server_metrics": {
+    "kv_cache_usage_tokens": 48755.0,
+    "kv_cache_capacity_tokens": 416242.0,
+    "kv_cache_usage_pct": 11.713138030280462,
+    "prefix_cache_hit_rate": 0.0,
+    "num_preemptions": 0
+  },
+  "raw_initial_metrics": {
+    "sglang:num_used_tokens": 0.0,
+    "sglang:token_usage": 0.0,
+    "sglang:pending_prealloc_token_usage": 0.0,
+    "sglang:swa_token_usage": 0.0,
+    "sglang:gen_throughput": 0.0,
+    "sglang:cache_hit_rate": 0.0,
+    "sglang:max_total_num_tokens": 416242.0,
+    "sglang:num_retractions_sum": 0.0,
+    "sglang:num_retractions_bucket": 1.0,
+    "sglang:num_retractions_count": 1.0
+  },
+  "raw_final_metrics": {
+    "sglang:num_used_tokens": 48755.0,
+    "sglang:token_usage": 0.11713138030280462,
+    "sglang:pending_prealloc_token_usage": 0.0,
+    "sglang:swa_token_usage": 0.0,
+    "sglang:gen_throughput": 94.30005099671136,
+    "sglang:cache_hit_rate": 0.0,
+    "sglang:max_total_num_tokens": 416242.0,
+    "sglang:num_retractions_sum": 0.0,
+    "sglang:num_retractions_bucket": 57.0,
+    "sglang:num_retractions_count": 57.0
+  }
+}
