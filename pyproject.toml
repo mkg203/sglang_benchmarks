@@ -1,0 +1,15 @@
+[project]
+name = "sglang-benchmarks"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiohttp>=3.13.3",
+    "huggingface>=0.0.1",
+    "matplotlib>=3.10.8",
+    "numpy>=2.4.2",
+    "sglang>=0.5.8.post1",
+    "tqdm>=4.67.3",
+    "transformers>=4.57.1",
+]
