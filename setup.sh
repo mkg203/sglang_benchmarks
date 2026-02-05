@@ -1,10 +1,13 @@
-!#/bin/bash
-
 apt-get update
 apt-get install libnuma1
 
 curl -LsSf https://astral.sh/uv/install.sh | sh
-source ~/.bashrc
+source $HOME/.local/bin/env
 
-uv venv -p 3.12
-uv pip install -r requirements.txt
+uv sync
+
+if [[ -n $HF_TOKEN ]]; then
+  hf auth login --token $HF_TOKEN
+else
+  echo "hugging face cli not initialized"
+fi

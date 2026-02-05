@@ -3,3 +3,5 @@ LightNovels.txt
 .venv
 *.tok
 kv
+__pycache__
+env*
