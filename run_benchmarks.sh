@@ -1,9 +1,11 @@
-for i in $(ls workload_long_ctx);
+source .venv/bin/activate
+
+for i in workload_long_ctx/*;
 do 
-  bash run_server.sh > >(tee server.log) &
+  stdbuf -oL bash run_server.sh > >(tee server.log) &
   SERVER_PID=$!
 
-  tail -f server.log | rg -m 1 "READY"
+  tail -f server.log --pid=$SERVER_PID | rg -m 1 "The server is fired up and ready to roll!"
 
   echo "--- Server is ready. Starting Benchmarks ---"
 
