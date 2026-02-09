@@ -27,7 +27,7 @@ cleanup() {
     fi
 
     fuser -k -TERM "$SERVER_PORT/tcp" >/dev/null 2>&1
-    pkill -f "python3 -m sglang.launch_server" 2>/dev/null
+    pkill -f "sglang" 2>/dev/null
     
     sleep 3
     echo "Cleanup complete."
