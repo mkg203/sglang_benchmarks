@@ -1,36 +1,48 @@
+# NOTE: RUN THIS FILE FROM ROOT DIR
 #!/bin/bash
 
 source .venv/bin/activate
 
 # --- CONFIGURATION ---
 SERVER_PORT=30000
+MODEL_PATH="meta-llama/Llama-3.1-8B-Instruct" 
 # ---------------------
 
+ENABLE_CPU_CACHE=0
+for arg in "$@"; do
+    if [[ "$arg" == "--enable-cpu-cache" ]]; then
+        ENABLE_CPU_CACHE=1
+        echo "CPU Hierarchical Cache ENABLED"
+    fi
+done
+
 cleanup() {
-    echo "CLEANING UP"
+    echo ""
+    echo "!!! CAUGHT EXIT SIGNAL / CLEANING UP !!!"
     
     if [[ -n "$SERVER_PID" ]]; then
-        echo "Killing wrapper script (PID $SERVER_PID)..."
+        echo "Killing process group $SERVER_PID..."
         kill -TERM -"$SERVER_PID" 2>/dev/null 
         kill "$SERVER_PID" 2>/dev/null
     fi
 
-    echo "Ensuring sglang python processes are dead..."
-    
     fuser -k -TERM "$SERVER_PORT/tcp" >/dev/null 2>&1
-    
     pkill -f "python3 -m sglang.launch_server" 2>/dev/null
     
-    sleep 2
-    
+    sleep 3
     echo "Cleanup complete."
 }
 
-trap 'echo "!!! CAUGHT EXIT SIGNAL !!!"
-; cleanup; exit 1' SIGINT SIGTERM
+trap 'cleanup; exit 1' SIGINT SIGTERM
 
 mkdir -p results
 
+CACHE_FLAG=""
+if [[ "$ENABLE_CPU_CACHE" -eq 1 ]]; then
+    CACHE_FLAG="--enable-hierarchical-cache"
+fi
+
+# --- MAIN LOOP ---
 for i in workload_long_ctx/*; do
     [ -e "$i" ] || continue
     
@@ -38,17 +50,25 @@ for i in workload_long_ctx/*; do
     OUTPUT_NAME="${FILENAME%%_turns*}"
     
     echo "=================================="
-    echo "Processing: $OUTPUT_NAME"
+    echo "Processing Workload: $OUTPUT_NAME"
     
     > server.log
 
-    setsid stdbuf -oL bash run_server.sh > server.log 2>&1 &
+
+    echo "Starting SGLang Server..."
+
+    setsid stdbuf -oL python -m sglang.launch_server \
+        --model-path "$MODEL_PATH" \
+        --port "$SERVER_PORT" \
+        --enable-metrics \
+        --mem-fraction-static 0.4 \
+        $CACHE_FLAG > server.log 2>&1 &
+        
     SERVER_PID=$!
-    
     echo "Server Process Group: $SERVER_PID"
 
     SERVER_READY=0
-    MAX_RETRIES=60
+    MAX_RETRIES=75 
     COUNT=0
     
     while [ $COUNT -lt $MAX_RETRIES ]; do
@@ -58,7 +78,7 @@ for i in workload_long_ctx/*; do
         fi
         
         if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-            echo "Server crashed before becoming ready!"
+            echo "Server process died unexpectedly!"
             break
         fi
         
@@ -67,20 +87,20 @@ for i in workload_long_ctx/*; do
     done
 
     if [[ $SERVER_READY == 1 ]]; then
-        echo "--- Server is Ready. Running Benchmark ---"
+        echo "--- Server Ready. Running Benchmark ---"
         
-        python -m src.benchmarks.py "$i" --output "results/$OUTPUT_NAME"
-        # sleep 5 
+        python -m src.benchmarks "$i" --output "results/$OUTPUT_NAME"
         
-        if [ $? -ne 0 ]; then
-             echo "!!! ERROR: Benchmark script failed for $OUTPUT_NAME !!!"
-             cleanup
+        EXIT_CODE=$?
+        
+        if [ $EXIT_CODE -ne 0 ]; then
+             echo "!!! ERROR: Benchmark failed with code $EXIT_CODE !!!"
+             cleanup 
              exit 1
         fi
 
     else
-        echo "!!! ERROR: Server failed to start or timed out for $OUTPUT_NAME !!!"
-        cat server.log
+        echo "!!! ERROR: Server failed to start (Timeout or Crash) !!!"
         cleanup
         exit 1
     fi
