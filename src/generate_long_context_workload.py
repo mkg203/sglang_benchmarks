@@ -5,11 +5,11 @@ from pathlib import Path
 
 import numpy as np
 
-from generate_workload import (
+from src.generate_workload import (
     Request,
     TextSource,
     analyze_concurrency_profile,
-    populate_prompts,
+    populate_prompts
 )
 
 

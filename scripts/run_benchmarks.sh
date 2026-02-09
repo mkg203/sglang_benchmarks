@@ -69,8 +69,8 @@ for i in workload_long_ctx/*; do
     if [[ $SERVER_READY == 1 ]]; then
         echo "--- Server is Ready. Running Benchmark ---"
         
-        # python -m src.benchmarks.py "$i" --output "results/$OUTPUT_NAME"
-        sleep 5 
+        python -m src.benchmarks.py "$i" --output "results/$OUTPUT_NAME"
+        # sleep 5 
         
         if [ $? -ne 0 ]; then
              echo "!!! ERROR: Benchmark script failed for $OUTPUT_NAME !!!"

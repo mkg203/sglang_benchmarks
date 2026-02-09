@@ -1,7 +1,8 @@
 LightNovels.txt
 *.png
 .venv
-*.tok
+.hftoken
 kv
 __pycache__
-env*
+*env*
+*.zip
