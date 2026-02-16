@@ -125,11 +125,11 @@ def plot_comparison(configs: List[Dict], output_file: str):
             positions = x_positions + (i - 2.5) * bar_width
             ax.bar(positions, values, bar_width, label=pct, color=colors[i], alpha=0.8)
 
-        ax.set_xlabel("Configuration", fontweight="bold")
+        ax.set_xlabel("Context Length (Tokens)", fontweight="bold")
         ax.set_ylabel("Latency (seconds)", fontweight="bold")
         ax.set_title(title, fontweight="bold")
         ax.set_xticks(x_positions)
-        ax.set_xticklabels([c["name"] for c in configs], rotation=15, ha="right")
+        ax.set_xticklabels([c["name"].split('_')[2] for c in configs], rotation=15, ha="right")
         ax.legend(loc="upper left", fontsize=8)
         ax.grid(axis="y", alpha=0.3)
 
@@ -144,14 +144,14 @@ def plot_throughput_comparison(configs: List[Dict], output_file: str):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
     fig.suptitle("Throughput Comparison", fontsize=14, fontweight="bold")
 
-    names = [c["name"] for c in configs]
+    names = [c["name"].split('_')[2] for c in configs]
     token_throughput = [c["stats"]["throughput_tokens_per_sec"] for c in configs]
     request_throughput = [c["stats"]["throughput_requests_per_sec"] for c in configs]
 
     x_pos = np.arange(len(names))
 
     ax1.bar(x_pos, token_throughput, color="#3498db", alpha=0.8)
-    ax1.set_xlabel("Configuration", fontweight="bold")
+    ax1.set_xlabel("Context Length (Tokens)", fontweight="bold")
     ax1.set_ylabel("Tokens/sec", fontweight="bold")
     ax1.set_title("Token Throughput")
     ax1.set_xticks(x_pos)
@@ -159,7 +159,7 @@ def plot_throughput_comparison(configs: List[Dict], output_file: str):
     ax1.grid(axis="y", alpha=0.3)
 
     ax2.bar(x_pos, request_throughput, color="#e74c3c", alpha=0.8)
-    ax2.set_xlabel("Configuration", fontweight="bold")
+    ax2.set_xlabel("Context Length (Tokens)", fontweight="bold")
     ax2.set_ylabel("Requests/sec", fontweight="bold")
     ax2.set_title("Request Throughput")
     ax2.set_xticks(x_pos)
@@ -189,12 +189,12 @@ def main():
     )
     parser.add_argument(
         "--output",
-        default="benchmark_comparison.png",
+        default="plots/benchmark_comparison.png",
         help="Output latency comparison plot filename",
     )
     parser.add_argument(
         "--throughput-plot",
-        default="throughput_comparison.png",
+        default="plots/throughput_comparison.png",
         help="Output throughput plot filename",
     )
 
@@ -236,8 +236,8 @@ def main():
     configs = sorted(
         loaded_configs,
         key=lambda x: (
-            int(re.search(r"conc_(\d+)", x["name"]).group(1))
-            if re.search(r"conc_(\d+)", x["name"])
+            int(re.search(r"ctx_(\d+)", x["name"]).group(1))
+            if re.search(r"ctx_(\d+)", x["name"])
             else 0
         ),
     )
@@ -250,8 +250,8 @@ def main():
     base_prefix = args.directory.strip("/").replace("/", "_")
 
     # Generate plots using the sorted configs
-    plot_comparison(configs, f"{base_prefix}_latency.png")
-    plot_throughput_comparison(configs, f"{base_prefix}_throughput.png")
+    plot_comparison(configs, f"plots/{base_prefix}_latency.png")
+    plot_throughput_comparison(configs, f"plots/{base_prefix}_throughput.png")
 
     print("\n✓ Done!")
 

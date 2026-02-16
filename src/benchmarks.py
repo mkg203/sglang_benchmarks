@@ -1,13 +1,18 @@
 import asyncio
 import argparse
 import json
+import logging
 import time
 import aiohttp
 import numpy as np
-from typing import List, Dict, Optional, Any
+from typing import Any
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from tqdm import tqdm
+from src.metrics_tracker import collect_metrics
+from multiprocessing import Process, Event
+import datetime
+import os
 
 # --- Configuration & Constants ---
 METRICS_TO_TRACK = [
@@ -17,6 +22,7 @@ METRICS_TO_TRACK = [
     "gen_throughput",
     "cache_hit_rate",
     "num_retractions",
+    "kv_transfer_alloc_ms",
 ]
 
 
@@ -54,6 +60,7 @@ class BenchmarkRunner:
         self.results: list[RequestResult] = []
         self.benchmark_start_time = 0.0
         self.session_histories = {}
+        self.failed_requests = 0
 
     async def send_request(
         self,
@@ -130,7 +137,7 @@ class BenchmarkRunner:
                 )
 
         except Exception as e:
-            print(f"ERROR: Request {request_id} failed: {e}")
+            logging.error(f"Request {request_id} failed: {e}")
             raise
 
     async def run_session(
@@ -138,10 +145,14 @@ class BenchmarkRunner:
     ) -> list[RequestResult]:
         session_results = []
         for request in session_workload:
-            result = await self.send_request(
-                session, request, (request["session_id"], request["turn_idx"])
-            )
-            session_results.append(result)
+            try:
+                result = await self.send_request(
+                    session, request, (request["session_id"], request["turn_idx"])
+                )
+                session_results.append(result)
+            except Exception:
+                self.failed_requests += 1
+
             pbar.update(1)
 
         return session_results
@@ -151,10 +162,15 @@ class BenchmarkRunner:
     ) -> list[RequestResult]:
         """Run the full benchmark workload."""
         total_requests = sum(len(s_load) for s_load in workload.values())
-        print(
+        logging.info(
             f"Running benchmark with {len(workload)} sessions and ({total_requests=}..."
         )
 
+        stop = Event()
+        metrics_collection = Process(
+            target=collect_metrics, args=(self.server_url, stop)
+        )
+        metrics_collection.start()
         self.benchmark_start_time = time.time()
 
         async with aiohttp.ClientSession() as session:
@@ -167,58 +183,26 @@ class BenchmarkRunner:
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
 
+        stop.set()
+        metrics_collection.join()
+
         self.results = [
             request
             for session_results in results
             if isinstance(session_results, list)
             for request in session_results
-            if isinstance(request, RequestResult)
+            # if isinstance(request, RequestResult)
         ]
 
         duration = time.time() - self.benchmark_start_time
-        print(f"Benchmark completed in {duration:.2f}s")
-        print(f"Successful requests: {len(self.results)}/{len(workload)}")
+        logging.info(f"Benchmark completed in {duration:.2f}s")
+        logging.info(f"Successful requests: {len(self.results)}/{len(workload)}")
         return self.results
-
-    async def collect_metrics(self) -> Dict[str, float]:
-        """Collect and parse metrics from the server's Prometheus endpoint."""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(f"{self.server_url}/metrics") as response:
-                    if response.status != 200:
-                        print(f"WARNING: Metrics endpoint returned {response.status}")
-                        return {}
-                    return self._parse_prometheus_metrics(await response.text())
-        except Exception as e:
-            print(f"WARNING: Failed to collect server metrics: {e}")
-            return {}
-
-    def _parse_prometheus_metrics(self, metrics_text: str) -> Dict[str, float]:
-        """Extract relevant metrics from Prometheus text format."""
-        metrics = {}
-        for line in metrics_text.splitlines():
-            if line.startswith("#") or not line.strip():
-                continue
-
-            # Expecting format: metric_name{labels} value
-            parts = line.split()
-            if len(parts) < 2:
-                continue
-
-            full_name, value_str = parts[0], parts[1]
-            metric_name = full_name.split("{")[0]
-
-            if any(k in metric_name for k in METRICS_TO_TRACK):
-                try:
-                    metrics[metric_name] = float(value_str)
-                except ValueError:
-                    pass
-        return metrics
 
 
 def calculate_statistics(
-    results: List[RequestResult], duration: float
-) -> Dict[str, Any]:
+    results: list[RequestResult], duration: float
+) -> dict[str, Any]:
     """Calculate comprehensive statistics from request results."""
     if not results:
         return {}
@@ -233,7 +217,7 @@ def calculate_statistics(
         r.decode_time / r.output_tokens for r in results if r.output_tokens > 0
     ]
 
-    def get_percentiles(data: List[float]) -> Dict[str, float]:
+    def get_percentiles(data: list[float]) -> dict[str, float]:
         if not data:
             return {}
         return {
@@ -266,32 +250,12 @@ def calculate_statistics(
     }
 
 
-def augment_stats_with_server_metrics(stats: Dict, initial: Dict, final: Dict) -> Dict:
-    """Add KV cache, cache hit rate, and preemption metrics to stats."""
-
-    # 1. KV Cache Usage (Snapshot at end)
-    used = final.get("sglang:num_used_tokens", 0)
-    total = final.get("sglang:max_total_num_tokens", 0)
-
-    stats["server_metrics"] = {
-        "kv_cache_usage_tokens": used,
-        "kv_cache_capacity_tokens": total,
-        "kv_cache_usage_pct": (used / total * 100) if total > 0 else 0.0,
-        "prefix_cache_hit_rate": final.get("sglang:cache_hit_rate", 0),
-    }
-
-    # 2. Preemptions (Delta)
-    # Using 'get' with 0 default to handle cases where metric is missing
-    init_retractions = initial.get("sglang:num_retractions", 0)
-    final_retractions = final.get("sglang:num_retractions", 0)
-    stats["server_metrics"]["num_preemptions"] = max(
-        0, final_retractions - init_retractions
-    )
-
-    return stats
-
-
 async def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%H:%M:%S",
+    )
     parser = argparse.ArgumentParser(description="SGLang Benchmark Runner")
     parser.add_argument("workload", type=Path, help="Path to workload JSON file")
     parser.add_argument("--output", required=True, type=Path, help="Output file prefix")
@@ -301,14 +265,14 @@ async def main():
     args = parser.parse_args()
 
     # Ensure output directory exists
-    args.output.parent.mkdir(parents=True, exist_ok=True)
+    # args.output.parent.mkdir(parents=True, exist_ok=True)
 
-    print("=" * 60)
-    print(f"SGLang Benchmark Runner")
-    print(f"Workload: {args.workload}")
-    print(f"Server:   {args.server}")
-    print(f"Output:   {args.output}_*")
-    print("=" * 60)
+    logging.info("=" * 60)
+    logging.info(f"SGLang Benchmark Runner")
+    logging.info(f"Workload: {args.workload}")
+    logging.info(f"Server:   {args.server}")
+    logging.info(f"Output:   {args.output}_*")
+    logging.info("=" * 60)
 
     # Load workload
     n_requests: int
@@ -323,38 +287,29 @@ async def main():
                 continue
 
             workload[s_id].append(request)
-    print(f"Loaded {n_requests} requests")
+    logging.info(f"Loaded {n_requests} requests")
 
     runner = BenchmarkRunner(server_url=args.server)
 
-    # Initial Metrics
-    print("\nCollecting initial server metrics...")
-    initial_metrics = await runner.collect_metrics()
-
     # Run Benchmark
-    print()
     results = await runner.run_benchmark(workload)
 
-    # Final Metrics
-    print("\nCollecting final server metrics...")
-    final_metrics = await runner.collect_metrics()
-
-    # Calculate Stats
-    print("\nCalculating statistics...")
+    logging.info("Calculating statistics...")
     duration = max((r.completion_time for r in results), default=0)
     stats = calculate_statistics(results, duration)
-
-    # Add Server Metrics (KV, Preemptions, Cache Hit)
-    stats = augment_stats_with_server_metrics(stats, initial_metrics, final_metrics)
-    stats["raw_initial_metrics"] = initial_metrics
-    stats["raw_final_metrics"] = final_metrics
+    stats["failed_requests"] = runner.failed_requests
 
     # Save
-    print(f"\nSaving results to {args.output}_* ...")
-    with open(f"{args.output}_results.json", "w") as f:
+    date = datetime.datetime.now()
+    base_dir = f"results/{date.month}-{date.day}/"
+    os.mkdir(base_dir)
+    
+    logging.info(f"Saving results to {args.output}_* ...")
+    
+    with open(f"{base_dir}{args.output}_results.json", "w") as f:
         json.dump([asdict(r) for r in results], f, indent=2)
 
-    with open(f"{args.output}_stats.json", "w") as f:
+    with open(f"{base_dir}{args.output}_stats.json", "w") as f:
         json.dump(stats, f, indent=2)
 
     # Summary
@@ -362,32 +317,33 @@ async def main():
     ttft = stats["time_to_first_token"]
     itl = stats["inter_token_latency"]
 
-    print("\n" + "=" * 60)
-    print("BENCHMARK SUMMARY")
-    print("=" * 60)
-    print(f"Requests:      {stats['num_requests']}")
-    print(f"Duration:      {stats['total_duration']:.2f}s")
-    print(f"Throughput:    {stats['throughput_tokens_per_sec']:.2f} tokens/s")
-    print(f"               {stats['throughput_requests_per_sec']:.2f} req/s")
+    logging.info("=" * 60)
+    logging.info("BENCHMARK SUMMARY")
+    logging.info("=" * 60)
+    logging.info(f"Requests:      {stats['num_requests']}")
+    logging.info(f"Failed Requests:      {stats['failed_requests']}")
+    logging.info(f"Duration:      {stats['total_duration']:.2f}s")
+    logging.info(f"Throughput:    {stats['throughput_tokens_per_sec']:.2f} tokens/s")
+    logging.info(f"               {stats['throughput_requests_per_sec']:.2f} req/s")
 
-    print("-" * 60)
-    print(f"Latency (P50 | P99)")
-    print(
+    logging.info("-" * 60)
+    logging.info(f"Latency (P50 | P99)")
+    logging.info(
         f"TTFT:          {ttft.get('p50',0)*1000:.2f}ms | {ttft.get('p99',0)*1000:.2f}ms"
     )
-    print(
+    logging.info(
         f"ITL:           {itl.get('p50',0)*1000:.2f}ms | {itl.get('p99',0)*1000:.2f}ms"
     )
 
-    print("-" * 60)
-    print("Server Metrics")
-    print(
+    logging.info("-" * 60)
+    logging.info("Server Metrics")
+    logging.info(
         f"KV Cache Usage:    {sm['kv_cache_usage_pct']:.2f}% ({int(sm['kv_cache_usage_tokens'])}/{int(sm['kv_cache_capacity_tokens'])})"
     )
-    print(f"Prefix Cache Hit:  {sm['prefix_cache_hit_rate'] * 100:.2f}%")
-    print(f"Preemptions:       {sm['num_preemptions']}")
-    print("=" * 60)
-    print("\n✓ Done!")
+    logging.info(f"Prefix Cache Hit:  {sm['prefix_cache_hit_rate'] * 100:.2f}%")
+    logging.info(f"Preemptions:       {sm['num_preemptions']}")
+    logging.info("=" * 60)
+    logging.info("✓ Done!")
 
 
 if __name__ == "__main__":

@@ -89,7 +89,7 @@ for i in workload_long_ctx/*; do
     if [[ $SERVER_READY == 1 ]]; then
         echo "--- Server Ready. Running Benchmark ---"
         
-        python -m src.benchmarks "$i" --output "results/$OUTPUT_NAME"
+        python -m src.benchmarks "$i" --output "$OUTPUT_NAME"
         
         EXIT_CODE=$?
         
