@@ -166,11 +166,6 @@ class BenchmarkRunner:
             f"Running benchmark with {len(workload)} sessions and ({total_requests=}..."
         )
 
-        stop = Event()
-        metrics_collection = Process(
-            target=collect_metrics, args=(self.server_url, stop)
-        )
-        metrics_collection.start()
         self.benchmark_start_time = time.time()
 
         async with aiohttp.ClientSession() as session:
@@ -182,9 +177,6 @@ class BenchmarkRunner:
                     for session_id, session_workload in workload.items()
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        stop.set()
-        metrics_collection.join()
 
         self.results = [
             request
@@ -291,8 +283,23 @@ async def main():
 
     runner = BenchmarkRunner(server_url=args.server)
 
+
+    date = datetime.datetime.now()
+    base_dir = f"results/{date.month}-{date.day}/"
+    os.mkdir(base_dir)
+    
     # Run Benchmark
+
+    stop = Event()
+    metrics_collection = Process(
+        target=collect_metrics, args=(self.server_url, stop, f"{base_dir}{args.output}")
+    )
+    metrics_collection.start()
+    
     results = await runner.run_benchmark(workload)
+
+    stop.set()
+    metrics_collection.join()
 
     logging.info("Calculating statistics...")
     duration = max((r.completion_time for r in results), default=0)
@@ -300,10 +307,6 @@ async def main():
     stats["failed_requests"] = runner.failed_requests
 
     # Save
-    date = datetime.datetime.now()
-    base_dir = f"results/{date.month}-{date.day}/"
-    os.mkdir(base_dir)
-    
     logging.info(f"Saving results to {args.output}_* ...")
     
     with open(f"{base_dir}{args.output}_results.json", "w") as f:
@@ -313,7 +316,6 @@ async def main():
         json.dump(stats, f, indent=2)
 
     # Summary
-    sm = stats["server_metrics"]
     ttft = stats["time_to_first_token"]
     itl = stats["inter_token_latency"]
 
@@ -335,13 +337,6 @@ async def main():
         f"ITL:           {itl.get('p50',0)*1000:.2f}ms | {itl.get('p99',0)*1000:.2f}ms"
     )
 
-    logging.info("-" * 60)
-    logging.info("Server Metrics")
-    logging.info(
-        f"KV Cache Usage:    {sm['kv_cache_usage_pct']:.2f}% ({int(sm['kv_cache_usage_tokens'])}/{int(sm['kv_cache_capacity_tokens'])})"
-    )
-    logging.info(f"Prefix Cache Hit:  {sm['prefix_cache_hit_rate'] * 100:.2f}%")
-    logging.info(f"Preemptions:       {sm['num_preemptions']}")
     logging.info("=" * 60)
     logging.info("✓ Done!")
 
