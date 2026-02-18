@@ -21,15 +21,19 @@ cleanup() {
     echo "!!! CAUGHT EXIT SIGNAL / CLEANING UP !!!"
     
     if [[ -n "$SERVER_PID" ]]; then
-        echo "Killing process group $SERVER_PID..."
-        kill -TERM -"$SERVER_PID" 2>/dev/null 
-        kill "$SERVER_PID" 2>/dev/null
+        echo "Killing Process Group $SERVER_PID..."
+        kill -TERM -- -"$SERVER_PID" 2>/dev/null
+        wait "$SERVER_PID" 2>/dev/null
     fi
 
-    fuser -k -TERM "$SERVER_PORT/tcp" >/dev/null 2>&1
-    pkill -f "sglang" 2>/dev/null
+    echo "Hunting down sglang processes..."
     
-    sleep 3
+    fuser -k -TERM "$SERVER_PORT/tcp" >/dev/null 2>&1
+    
+    pkill -9 -f "sglang.launch_server" 2>/dev/null
+    
+    sleep 2
+    
     echo "Cleanup complete."
 }
 

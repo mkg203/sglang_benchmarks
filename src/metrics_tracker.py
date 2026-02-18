@@ -91,3 +91,6 @@ def augment_stats_with_server_metrics(stats: dict, initial: dict, final: dict) -
 
     return stats
 
+
+if __name__ == "__main__":
+    collect_metrics("http://localhost:30000", False, "test")
