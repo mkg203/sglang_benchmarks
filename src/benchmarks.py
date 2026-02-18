@@ -13,6 +13,7 @@ from src.metrics_tracker import collect_metrics
 from multiprocessing import Process, Event
 import datetime
 import os
+from transformers import AutoTokenizer
 
 
 @dataclass
@@ -51,36 +52,53 @@ class BenchmarkRunner:
         self.session_histories = {}
         self.failed_requests = 0
 
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3.1-8B-Instruct")
+        except OSError:
+            logging.error("Could not load tokenizer. Ensure you have access to the model on Hugging Face.")
+            raise
+            
     async def send_request(
         self,
         session: aiohttp.ClientSession,
         request_data: dict,
         request_id: tuple[int, int],
     ) -> RequestResult:
-        """Send a single request and collect metrics."""
-        # Calculate wait time relative to benchmark start
+        
         target_time = self.benchmark_start_time + request_data["arrival_time"]
         wait_time = target_time - time.time()
-
         if wait_time > 0:
             await asyncio.sleep(wait_time)
 
-        actual_start_abs = time.time()
-
         session_id = request_data["session_id"]
-        text = (
-            self.session_histories.get(session_id, request_data.get("prefix_text", ""))
-            + request_data["query_text"]
+
+        if session_id not in self.session_histories:
+            self.session_histories[session_id] = []
+            if request_data.get("prefix_text"):
+                self.session_histories[session_id].append({
+                    "role": "system", 
+                    "content": request_data["prefix_text"]
+                })
+
+        messages = self.session_histories[session_id]
+        messages.append({"role": "user", "content": request_data["query_text"]})
+
+        full_prompt_text = self.tokenizer.apply_chat_template(
+            messages, 
+            tokenize=False, 
+            add_generation_prompt=True
         )
 
         payload = {
-            # "text": request_data.get("prefix_text", "") + request_data["query_text"],
-            "text": text,
+            "text": full_prompt_text,
             "sampling_params": {
                 "max_new_tokens": request_data["output_tokens"],
                 "temperature": 0.0,
+                "ignore_eos": False
             },
         }
+        
+        actual_start_abs = time.time()
 
         try:
             async with session.post(
@@ -92,23 +110,19 @@ class BenchmarkRunner:
                 completion_time_abs = time.time()
 
                 meta = result.get("meta_info", {})
-                # update session history
-                self.session_histories[session_id] = text + result.get("text", "")
-
-                # Server-reported metrics
-                server_e2e = meta.get(
-                    "e2e_latency", completion_time_abs - actual_start_abs
-                )
+                server_e2e = meta.get("e2e_latency", completion_time_abs - actual_start_abs)
                 server_queue = meta.get("queue_time", 0)
                 server_prefill = meta.get("prefill_launch_latency", 0)
+                
+                cached_tokens = meta.get("cached_tokens", 0) 
 
-                # Derived metrics
-                ttft = server_queue + server_prefill
-                decode_time = server_e2e - ttft
+                assistant_response = result.get("text", "")
+                messages.append({"role": "assistant", "content": assistant_response})
+                self.session_histories[session_id] = messages
 
                 return RequestResult(
                     request_id=request_id,
-                    session_id=request_data["session_id"],
+                    session_id=session_id,
                     turn_idx=request_data["turn_idx"],
                     prefix_tokens=request_data["prefix_tokens"],
                     new_input_tokens=request_data["new_input_tokens"],
@@ -116,13 +130,13 @@ class BenchmarkRunner:
                     scheduled_arrival_time=request_data["arrival_time"],
                     actual_start_time=actual_start_abs - self.benchmark_start_time,
                     completion_time=completion_time_abs - self.benchmark_start_time,
-                    time_to_first_token=ttft,
+                    time_to_first_token=server_queue + server_prefill,
                     prefill_time=server_prefill,
-                    decode_time=decode_time,
+                    decode_time=server_e2e - (server_queue + server_prefill),
                     total_latency=server_e2e,
                     server_queue_time=server_queue,
                     server_e2e_latency=server_e2e,
-                    cached_tokens=meta.get("cached_tokens", 0),
+                    cached_tokens=cached_tokens,
                 )
 
         except Exception as e:
