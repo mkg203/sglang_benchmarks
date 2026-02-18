@@ -286,7 +286,7 @@ async def main():
 
     date = datetime.datetime.now()
     base_dir = f"results/{date.month}-{date.day}/"
-    os.mkdir(base_dir)
+    os.makedirs(base_dir, exist_ok=True)
     
     # Run Benchmark
 
