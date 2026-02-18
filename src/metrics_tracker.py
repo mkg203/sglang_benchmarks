@@ -27,9 +27,9 @@ def collect_metrics(server_url: str, stop_event: Event, output_prefix: str) -> N
     
     metrics = []
 
-    while stop_event.is_set():
-        try:
-            with requests.session() as session:
+    with requests.session() as session:
+        while not stop_event.is_set():
+            try:
                 response = session.get(f"{server_url}/metrics", timeout=2)
                 if response.status_code != 200:
                     logging.warning(
@@ -37,9 +37,9 @@ def collect_metrics(server_url: str, stop_event: Event, output_prefix: str) -> N
                     )
                     continue
                 metrics.append(_parse_prometheus_metrics(response.text))
-        except Exception as e:
-            logging.warning(f"Failed to collect server metrics: {e}")
-        sleep(0.5)
+            except Exception as e:
+                logging.warning(f"Failed to collect server metrics: {e}")
+            sleep(0.5)
 
     with open(f"{output_prefix}_metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
@@ -90,7 +90,3 @@ def augment_stats_with_server_metrics(stats: dict, initial: dict, final: dict) -
     )
 
     return stats
-
-
-if __name__ == "__main__":
-    collect_metrics("http://localhost:30000", False, "test")
