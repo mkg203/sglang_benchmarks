@@ -65,7 +65,9 @@ for i in workload_long_ctx/*; do
         --model-path "$MODEL_PATH" \
         --port "$SERVER_PORT" \
         --enable-metrics \
-        # --mem-fraction-static 0.4 \
+        --mem-fraction-static 0.9 \
+        --max-running-requests 16 \
+        --enable-prefix-caching \
         $CACHE_FLAG > server.log 2>&1 &
         
     SERVER_PID=$!
