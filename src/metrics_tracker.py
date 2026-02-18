@@ -39,7 +39,7 @@ def collect_metrics(server_url: str, stop_event: Event, output_prefix: str) -> N
                 metrics.append(_parse_prometheus_metrics(response.text))
             except Exception as e:
                 logging.warning(f"Failed to collect server metrics: {e}")
-            sleep(0.5)
+            sleep(1)
 
     with open(f"{output_prefix}_metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)

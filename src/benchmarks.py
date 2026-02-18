@@ -53,18 +53,22 @@ class BenchmarkRunner:
         self.failed_requests = 0
 
         try:
-            self.tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3.1-8B-Instruct")
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                "meta-llama/Meta-Llama-3.1-8B-Instruct"
+            )
         except OSError:
-            logging.error("Could not load tokenizer. Ensure you have access to the model on Hugging Face.")
+            logging.error(
+                "Could not load tokenizer. Ensure you have access to the model on Hugging Face."
+            )
             raise
-            
+
     async def send_request(
         self,
         session: aiohttp.ClientSession,
         request_data: dict,
         request_id: tuple[int, int],
     ) -> RequestResult:
-        
+
         target_time = self.benchmark_start_time + request_data["arrival_time"]
         wait_time = target_time - time.time()
         if wait_time > 0:
@@ -75,18 +79,15 @@ class BenchmarkRunner:
         if session_id not in self.session_histories:
             self.session_histories[session_id] = []
             if request_data.get("prefix_text"):
-                self.session_histories[session_id].append({
-                    "role": "system", 
-                    "content": request_data["prefix_text"]
-                })
+                self.session_histories[session_id].append(
+                    {"role": "system", "content": request_data["prefix_text"]}
+                )
 
         messages = self.session_histories[session_id]
         messages.append({"role": "user", "content": request_data["query_text"]})
 
         full_prompt_text = self.tokenizer.apply_chat_template(
-            messages, 
-            tokenize=False, 
-            add_generation_prompt=True
+            messages, tokenize=False, add_generation_prompt=True
         )
 
         payload = {
@@ -94,10 +95,10 @@ class BenchmarkRunner:
             "sampling_params": {
                 "max_new_tokens": request_data["output_tokens"],
                 "temperature": 0.0,
-                "ignore_eos": False
+                "ignore_eos": False,
             },
         }
-        
+
         actual_start_abs = time.time()
 
         try:
@@ -107,16 +108,29 @@ class BenchmarkRunner:
                 timeout=aiohttp.ClientTimeout(total=600),
             ) as response:
                 result = await response.json()
+                if response.status != 200 or "text" not in result:
+                    raise RuntimeError(
+                        f"Request {request_id} got bad response (status={response.status}): {result}"
+                    )
+                    
                 completion_time_abs = time.time()
 
                 meta = result.get("meta_info", {})
-                server_e2e = meta.get("e2e_latency", completion_time_abs - actual_start_abs)
+
+                if not meta:
+                    logging.warning(
+                        f"Request {request_id}: meta_info missing from response, latency fields will be estimated"
+                    )
+
+                server_e2e = meta.get(
+                    "e2e_latency", completion_time_abs - actual_start_abs
+                )
                 server_queue = meta.get("queue_time", 0)
                 server_prefill = meta.get("prefill_launch_latency", 0)
-                
-                cached_tokens = meta.get("cached_tokens", 0) 
 
-                assistant_response = result.get("text", "")
+                cached_tokens = meta.get("cached_tokens", 0)
+
+                assistant_response = result["text"].strip()
                 messages.append({"role": "assistant", "content": assistant_response})
                 self.session_histories[session_id] = messages
 
@@ -283,11 +297,10 @@ async def main():
 
     runner = BenchmarkRunner(server_url=args.server)
 
-
     date = datetime.datetime.now()
     base_dir = f"results/{date.month}-{date.day}/"
     os.makedirs(base_dir, exist_ok=True)
-    
+
     # Run Benchmark
 
     stop = Event()
@@ -295,13 +308,13 @@ async def main():
         target=collect_metrics, args=(args.server, stop, f"{base_dir}{args.output}")
     )
     metrics_collection.start()
-    
+
     try:
         results = await runner.run_benchmark(workload)
     finally:
         stop.set()
         metrics_collection.join()
-        
+
     logging.info("Calculating statistics...")
     duration = max((r.completion_time for r in results), default=0)
     stats = calculate_statistics(results, duration)
@@ -309,7 +322,7 @@ async def main():
 
     # Save
     logging.info(f"Saving results to {args.output}_* ...")
-    
+
     with open(f"{base_dir}{args.output}_results.json", "w") as f:
         json.dump([asdict(r) for r in results], f, indent=2)
 
