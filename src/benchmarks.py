@@ -292,7 +292,7 @@ async def main():
 
     stop = Event()
     metrics_collection = Process(
-        target=collect_metrics, args=(self.server_url, stop, f"{base_dir}{args.output}")
+        target=collect_metrics, args=(args.server_url, stop, f"{base_dir}{args.output}")
     )
     metrics_collection.start()
     
