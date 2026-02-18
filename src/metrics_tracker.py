@@ -16,6 +16,15 @@ METRICS_TO_TRACK = [
 
 def collect_metrics(server_url: str, stop_event: Event, output_prefix: str) -> None:
     """Collect and parse metrics from the server's Prometheus endpoint."""
+    logging.basicConfig(
+        filename="metrics.log",
+        level=logging.DEBUG,
+        format='%(asctime)s - %(message)s',
+        force=True 
+    )
+
+    logging.info("Metrics colletion has started")
+    
     metrics = []
 
     while stop_event.is_set():
@@ -81,3 +90,4 @@ def augment_stats_with_server_metrics(stats: dict, initial: dict, final: dict) -
     )
 
     return stats
+

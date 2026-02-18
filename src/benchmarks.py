@@ -14,17 +14,6 @@ from multiprocessing import Process, Event
 import datetime
 import os
 
-# --- Configuration & Constants ---
-METRICS_TO_TRACK = [
-    "num_used_tokens",
-    "token_usage",
-    "max_total_num_tokens",
-    "gen_throughput",
-    "cache_hit_rate",
-    "num_retractions",
-    "kv_transfer_alloc_ms",
-]
-
 
 @dataclass
 class RequestResult:
@@ -256,9 +245,6 @@ async def main():
     )
     args = parser.parse_args()
 
-    # Ensure output directory exists
-    # args.output.parent.mkdir(parents=True, exist_ok=True)
-
     logging.info("=" * 60)
     logging.info(f"SGLang Benchmark Runner")
     logging.info(f"Workload: {args.workload}")
@@ -292,15 +278,16 @@ async def main():
 
     stop = Event()
     metrics_collection = Process(
-        target=collect_metrics, args=(args.server_url, stop, f"{base_dir}{args.output}")
+        target=collect_metrics, args=(args.server, stop, f"{base_dir}{args.output}")
     )
     metrics_collection.start()
     
-    results = await runner.run_benchmark(workload)
-
-    stop.set()
-    metrics_collection.join()
-
+    try:
+        results = await runner.run_benchmark(workload)
+    finally:
+        stop.set()
+        metrics_collection.join()
+        
     logging.info("Calculating statistics...")
     duration = max((r.completion_time for r in results), default=0)
     stats = calculate_statistics(results, duration)
