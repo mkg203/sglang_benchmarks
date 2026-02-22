@@ -5,6 +5,8 @@ source .venv/bin/activate
 # --- CONFIGURATION ---
 SERVER_PORT=30000
 MODEL_PATH="meta-llama/Llama-3.1-8B-Instruct"
+MEM_FRACTION=0.9
+MAX_REQUESTS=16
 # ---------------------
 
 SERVER_PID=""
@@ -46,8 +48,10 @@ trap 'cleanup; exit 1' SIGINT SIGTERM
 mkdir -p results
 
 CACHE_FLAG=""
+CACHE_OUT=""
 if [[ "$ENABLE_CPU_CACHE" -eq 1 ]]; then
     CACHE_FLAG="--enable-hierarchical-cache"
+    CACHE_OUT="_cpu_cache"
 fi
 
 # --- MAIN LOOP ---
@@ -55,7 +59,7 @@ for i in workload_long_ctx/*; do
     [ -e "$i" ] || continue
 
     FILENAME=$(basename "$i")
-    OUTPUT_NAME="${FILENAME%%_turns*}"
+    OUTPUT_NAME="${FILENAME%%_turns*}$CACHE_OUT"
 
     echo "=================================="
     echo "Processing Workload: $OUTPUT_NAME"
@@ -67,9 +71,8 @@ for i in workload_long_ctx/*; do
         --model-path "$MODEL_PATH" \
         --port "$SERVER_PORT" \
         --enable-metrics \
-        --mem-fraction-static 0.9 \
-        --max-running-requests 16 \
-        --enable-prefix-caching \
+        --mem-fraction-static "$MEM_FRACTION" \
+        --max-running-requests "$MAX_REQUESTS" \
         $CACHE_FLAG > server.log 2>&1 &
 
     SERVER_PID=$!
